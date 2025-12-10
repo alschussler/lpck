@@ -1,0 +1,29 @@
+{
+  "name": "lpck",
+  "version": "1.0.0",
+  "description": "Install local packages",
+  "main": "./bin/index.js",
+  "type": "module",
+  "bin": {
+    "lpck": "./bin/index.js"
+  },
+  "files": [
+    "./bin"
+  ],
+  "scripts": {
+    "run": "npx lpck",
+    "build": "npx tsc"
+  },
+  "author": "alschussler",
+  "license": "ISC",
+  "dependencies": {
+    "@npmcli/map-workspaces": "5.0.3",
+    "@npmcli/package-json": "7.0.4"
+  },
+  "devDependencies": {
+    "@types/node": "24.10.2",
+    "@types/npmcli__map-workspaces": "3.0.4",
+    "@types/npmcli__package-json": "4.0.4",
+    "typescript": "5.8.2"
+  }
+}
