@@ -3,7 +3,7 @@
   "version": "1.0.0",
   "description": "Install local packages",
   "type": "module",
-  "bin": "bin/index.js",
+  "bin": "lib/index.js",
   "scripts": {
     "run": "npx lpck",
     "build": "npx tsc"
