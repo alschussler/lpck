@@ -15,11 +15,8 @@ Testing local packages from an npm workspace in another project is frustratingly
 ## Installation
 
 ```bash
-# Run directly with npx (recommended)
-npx lpck <source-package-dir>
-
-# Or install globally
-npm install -g lpck
+# Install from the github repository
+npm install -g https://github.com/alschussler/lpck.git --install-links
 ```
 
 ## Usage
