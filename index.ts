@@ -130,8 +130,8 @@ class OriginPackage {
         }
       }
   
-      // @ts-expect-error -- Wrong type definition
-      await workspacePackageJson.update({ dependencies: newDependencies }).save({ sort: false });
+      workspacePackageJson.content.dependencies = newDependencies;
+      await workspacePackageJson.save();
       console.info('Workspace dependency updated: ', bold(workspacePackageJson.content.name));
     }
   }
@@ -141,8 +141,8 @@ class OriginPackage {
     
     for (const workspaceInfo of this.#workspacesInfos.values()) {
       console.info('Restoring: ', bold(workspaceInfo.packageJson.content.name));
-      // @ts-expect-error -- Wrong type definition
-      await workspaceInfo.packageJson.update({ dependencies: workspaceInfo.oldDependencies }).save({ sort: false });
+      workspaceInfo.packageJson.content.dependencies = workspaceInfo.oldDependencies;
+      await workspaceInfo.packageJson.save();
     }
 
     console.info('Workspaces dependencies restored to original dependencies');
