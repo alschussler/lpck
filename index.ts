@@ -3,8 +3,10 @@ import mapWorkspaces from "@npmcli/map-workspaces";
 import PackageJson from "@npmcli/package-json";
 
 import { spawn } from "node:child_process";
-import { existsSync, mkdirSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, rm, rmSync, writeFileSync } from "node:fs";
 import path from "node:path";
+import os from 'node:os';
+import { parseArgs, type ParseArgsOptionsConfig } from "node:util";
 
 function bold(str: string) {
   return `\x1b[1m${str}\x1b[0m`;
@@ -26,17 +28,28 @@ function code(str: string) {
   return `\x1b[33m${str}\x1b[0m`;
 }
 
-const LPCK_DIR = path.join(process.cwd(), '.lpck');
+type LpckRC = {
+  presets: {
+    name: string;
+    path: string;
+    prepack: string;
+  }[]
+}
+
+const homeDir = os.homedir();
+const LPCK_DIR = path.join(homeDir, '.lpck');
+const LPCK_PACK_DIR = path.join(LPCK_DIR, 'packs');
+const LPCK_RC_PATH = path.join(LPCK_DIR, '.lpckrc');
 
 async function pack(packageDir: string) {
-  if (!existsSync(LPCK_DIR)) {
-    mkdirSync(LPCK_DIR);
+  if (!existsSync(LPCK_PACK_DIR)) {
+    mkdirSync(LPCK_PACK_DIR, { recursive: true });
   }
 
   await new Promise<void>((resolve, reject) => {
-    console.log(dim('Packing...'), dim(`npm pack --pack-destination ${LPCK_DIR} --workspaces`));
+    console.log(dim('Packing...'), dim(`npm pack --pack-destination ${LPCK_PACK_DIR} --workspaces`));
 
-    const p = spawn("npm", ["pack", '--pack-destination', LPCK_DIR, '--workspaces' ], { stdio: ["ignore", "ignore", "inherit"], cwd: packageDir });
+    const p = spawn("npm", ["pack", '--pack-destination', LPCK_PACK_DIR, '--workspaces' ], { stdio: ["ignore", "ignore", "inherit"], cwd: packageDir });
     p.on("exit", (code) => (code === 0 ? resolve() : reject(code)));
   });
 }
@@ -46,6 +59,17 @@ async function install(targetPackageDir: string, dependenciesToInstall: string[]
   
   await new Promise<void>((resolve, reject) => {
     const p = spawn("npm", ["install", ...dependenciesToInstall ], { stdio: ["ignore", "ignore", "inherit"], cwd: targetPackageDir });
+    p.on("exit", (code) => (code === 0 ? resolve() : reject(code)));
+  });
+}
+
+async function prepack(script: string, cwd: string) {
+  console.info('Executing prepack script...', dim(script));
+
+  const [command, ...args] = script.split(' ');
+
+  await new Promise<void>((resolve, reject) => {
+    const p = spawn(command, args, { stdio: ["ignore", "ignore", "inherit"], cwd });
     p.on("exit", (code) => (code === 0 ? resolve() : reject(code)));
   });
 }
@@ -140,6 +164,10 @@ class OriginPackage {
     console.info('Restoring workspaces dependencies to original dependencies...');
     
     for (const workspaceInfo of this.#workspacesInfos.values()) {
+      if (Object.keys(workspaceInfo.oldDependencies).length === 0) {
+        continue;
+      }
+
       console.info('Restoring: ', bold(workspaceInfo.packageJson.content.name));
       workspaceInfo.packageJson.content.dependencies = workspaceInfo.oldDependencies;
       await workspaceInfo.packageJson.save();
@@ -176,7 +204,7 @@ class TargetPackage {
     const dependencyNames = Object.keys(dependencies);
 
     const dependenciesToInstal = availablePackages.filter(availablePackage => dependencyNames.includes(availablePackage.name));
-    const packDirs = dependenciesToInstal.map(availablePackage => path.join(LPCK_DIR, availablePackage.packName));
+    const packDirs = dependenciesToInstal.map(availablePackage => path.join(LPCK_PACK_DIR, availablePackage.packName));
 
     if (dependenciesToInstal.length === 0) {
       console.info('No dependencies to install found in target package');
@@ -192,29 +220,220 @@ class TargetPackage {
   
 }
 
-const args = process.argv.slice(2);
-const [packageToInstallDir] = args;
+const ARGS_OPTIONS = {
+  preset: {
+    type: 'string',
+    short: 'p',
+  },
+  help: {
+    type: 'boolean',
+    short: 'h',
+    default: false,
+  },
+  printPresets: {
+    type: 'boolean',
+    default: false,
+  },
+  init: {
+    type: 'boolean',
+    default: false,
+  },
+  noPrepack: {
+    type: 'boolean',
+    default: false,
+  }
+} satisfies ParseArgsOptionsConfig;
 
-if (!packageToInstallDir || packageToInstallDir.trim().startsWith('-')) {
-  console.error("Provide the directory to the root of the workspace you want to install (", code("npx lpck <workspace-root-package-dir>"), ")");
-  process.exit(1);
+type Command = keyof typeof ARGS_OPTIONS | 'install';
+
+type ExecutionArgs = {
+  command: Command;
+  path?: string;
+  noPrepack?: boolean;
 }
 
-const targetPackage = new TargetPackage(process.cwd());
-const originPackage = new OriginPackage(packageToInstallDir);
-await originPackage.load();
+class LPCK {
+  #lpckRc: LpckRC;
 
-try {
-  await originPackage.updateDependencies();
-  await originPackage.pack();
-} catch (error) {
-  console.error(red(String(error)));
-} finally {
-  await originPackage.restoreDependencies();
+  #args: ExecutionArgs;
+
+  constructor() {
+    this.#loadRC();
+    this.#loadArgs(process.argv.slice(2));
+    this.#createRequiredFolders();
+  }
+
+  #createRequiredFolders() {
+    if (!existsSync(LPCK_PACK_DIR)) {
+      mkdirSync(LPCK_PACK_DIR, { recursive: true });
+    }
+  }
+
+  #loadRC() {
+     if (!existsSync(LPCK_RC_PATH)) {
+      this.#lpckRc = { presets: [] };
+      return;
+     }
+
+     this.#lpckRc = JSON.parse(readFileSync(LPCK_RC_PATH, 'utf8')) as LpckRC;
+  }
+
+  #loadArgs(args: string[]) {
+    const parsedArgs = parseArgs({
+      args,
+      options: ARGS_OPTIONS,
+      allowPositionals: true,
+      strict: true,
+    });
+
+    const { preset, printPresets, init, noPrepack } = parsedArgs.values;
+    const hasPositionals = parsedArgs.positionals.length === 1;
+
+    if (preset) {
+      this.#args = {
+        command: 'preset',
+        path: preset,
+        noPrepack,
+      };
+
+      return;
+    }
+
+    if (printPresets) {
+      this.#args = {
+        command: 'printPresets',
+      };
+
+      return;
+    }
+
+    if (init) {
+      this.#args = {
+        command: 'init',
+      };
+
+      return;
+    }
+
+    if (hasPositionals) {
+      this.#args = {
+        command: 'install',
+        path: parsedArgs.positionals[0],
+      };
+
+      return;
+    }
+
+    this.#args = {
+      command: 'help',
+    };
+  }
+
+  #cleanUpPacks() {
+    if (existsSync(LPCK_PACK_DIR)) {
+      rmSync(LPCK_PACK_DIR, { recursive: true });
+    }
+  }
+
+  #help() {
+    console.info('Usage:', code('lpck <workspace-root-package-dir>'), 'or', code('lpck [options]'));
+    console.info('Options:');
+    console.info('  -h, --help: Show this help');
+    console.info('  -p, --preset: The preset to use');
+    console.info('  --printPresets: Print the presets');
+    console.info('  --init: Initialize the LPCK RC');
+    console.info('  --noPrepack: Do not execute the prepack script');
+  }
+
+  #printPresets() {
+    if (this.#lpckRc.presets.length === 0) {
+      console.info('No presets found at: ', LPCK_RC_PATH);
+      return;
+    }
+
+    console.info(code(LPCK_RC_PATH), ': ', JSON.stringify(this.#lpckRc, null, 2));
+  }
+
+  #initRC() {
+    console.info('Initializing LPCK RC...');
+
+    if (existsSync(LPCK_RC_PATH)) {
+      console.error('LPCK RC already exists at: ', LPCK_RC_PATH);
+      process.exit(1);
+      return;
+    }
+
+    const mockRc: LpckRC = { presets: [{
+      name: '<preset-name>',
+      path: '<preset-path>',
+      prepack: '<prepack-script>',
+    }] };
+
+    writeFileSync(LPCK_RC_PATH, JSON.stringify(mockRc, null, 2));
+    console.info('LPCK RC initialized at: ', LPCK_RC_PATH);
+  }
+
+  async #install(originPackageDir: string) {
+    const targetPackage = new TargetPackage(process.cwd());
+    const originPackage = new OriginPackage(originPackageDir);
+    await originPackage.load();
+    
+    try {
+      await originPackage.updateDependencies();
+      await originPackage.pack();
+    } catch (error) {
+      console.error(red(String(error)));
+    } finally {
+      await originPackage.restoreDependencies();
+    }
+    
+    await targetPackage.load();
+    await targetPackage.install(originPackage.getAvailablePackages());
+
+    this.#cleanUpPacks();
+    console.info(green('Done'));
+  }
+
+  async #preset(name: string) {
+    console.info('Loading preset: ', code(name));
+
+    const preset = this.#lpckRc.presets.find(preset => preset.name === name);
+
+    if (!preset) {
+      console.error('Preset ', code(name), ' not found');
+      process.exit(1);
+      return;
+    }
+
+    if (preset.prepack && !this.#args.noPrepack) {
+      await prepack(preset.prepack, preset.path);
+    }
+
+    await this.#install(preset.path);
+  }
+
+  async run() {
+    switch (this.#args.command) {
+      case 'install':
+        await this.#install(this.#args.path!);
+        break;
+      case 'preset':
+        await this.#preset(this.#args.path!);
+        break;
+      case 'printPresets':
+        this.#printPresets();
+        break;
+      case 'help':
+        this.#help();
+        break;
+      case 'init':
+        this.#initRC();
+        break;
+      default:
+        this.#help();
+        break;
+    }
+  }
 }
 
-await targetPackage.load();
-await targetPackage.install(originPackage.getAvailablePackages());
-
-console.info(green('Done'));
-
+await (new LPCK()).run();
