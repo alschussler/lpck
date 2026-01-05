@@ -83,6 +83,10 @@ async function getPackName(packageJson: PackageJson) {
   return `${packageJson.content.name}-${packageJson.content.version}.tgz`.replace(/@/g, '').replace(/\//g, '-');
 }
 
+function getPackDir(packName: string) {
+  return path.join(LPCK_PACK_DIR, packName);
+}
+
 type WorkspaceInfo = {
   packageJson: PackageJson;
   packName: string;
@@ -150,7 +154,7 @@ class OriginPackage {
   
       for (const dependencyName of Object.keys(newDependencies)) {
         if (this.#workspacesInfos.has(dependencyName)) {
-          newDependencies[dependencyName] = path.join(LPCK_DIR, this.#workspacesInfos.get(dependencyName)!.packName);
+          newDependencies[dependencyName] = getPackDir(this.#workspacesInfos.get(dependencyName)!.packName);
         }
       }
   
@@ -204,7 +208,7 @@ class TargetPackage {
     const dependencyNames = Object.keys(dependencies);
 
     const dependenciesToInstal = availablePackages.filter(availablePackage => dependencyNames.includes(availablePackage.name));
-    const packDirs = dependenciesToInstal.map(availablePackage => path.join(LPCK_PACK_DIR, availablePackage.packName));
+    const packDirs = dependenciesToInstal.map(availablePackage => getPackDir(availablePackage.packName));
 
     if (dependenciesToInstal.length === 0) {
       console.info('No dependencies to install found in target package');
