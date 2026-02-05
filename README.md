@@ -25,8 +25,10 @@ npm install -g https://github.com/alschussler/lpck.git --install-links
 
 ```bash
 cd /path/to/your/target/project
-lpck /path/to/source/workspace
+lpck /path/to/source/workspace-or-package
 ```
+
+The source can be either the root of an npm workspace (monorepo) or a single package directory.
 
 **Example:**
 
@@ -36,6 +38,9 @@ cd ~/projects/my-app
 
 # Install packages from your local workspace
 lpck ~/projects/my-component-library
+
+# Or from a single package
+lpck ~/projects/my-package
 ```
 
 ### Using Presets
@@ -43,8 +48,8 @@ lpck ~/projects/my-component-library
 Presets let you save frequently used workspace paths and optional prepack scripts. Configuration is stored in `~/.lpck/.lpckrc`.
 
 ```bash
-# Initialize the config file
-lpck --init
+  # Initialize the config file (creates ~/.lpck/.lpckrc with a template)
+  lpck --init
 
 # Use a preset
 lpck -p my-preset
@@ -59,13 +64,13 @@ lpck --printPresets
 
 ### CLI Options
 
-| Option | Short | Description |
-|--------|-------|-------------|
-| `--help` | `-h` | Show help information |
-| `--preset <name>` | `-p` | Use a saved preset |
-| `--printPresets` | | Print all configured presets |
-| `--init` | | Initialize the `.lpckrc` config file |
-| `--noPrepack` | | Skip the prepack script when using a preset |
+| Option            | Short | Description                                 |
+| ----------------- | ----- | ------------------------------------------- |
+| `--help`          | `-h`  | Show help information                       |
+| `--preset <name>` | `-p`  | Use a saved preset                          |
+| `--printPresets`  |       | Print all configured presets                |
+| `--init`          |       | Initialize the `.lpckrc` config file        |
+| `--noPrepack`     |       | Skip the prepack script when using a preset |
 
 ## Configuration
 
@@ -85,17 +90,17 @@ The configuration file is located at `~/.lpck/.lpckrc` and uses JSON format:
 
 ### Preset Options
 
-| Field | Description |
-|-------|-------------|
-| `name` | The preset identifier used with `-p` |
-| `path` | Absolute path to the workspace root |
+| Field     | Description                                        |
+| --------- | -------------------------------------------------- |
+| `name`    | The preset identifier used with `-p`               |
+| `path`    | Absolute path to the workspace root                |
 | `prepack` | Command to run before packing (e.g., build script) |
 
 ## How It Works
 
 `lpck` performs the following steps:
 
-1. **Maps workspaces** — Scans the source directory and discovers all workspace packages
+1. **Maps workspaces** — Scans the source directory and discovers all workspace packages (or treats it as a single package if there are no workspaces)
 2. **Runs prepack** — If using a preset with a prepack script, executes it first
 3. **Updates internal dependencies** — Temporarily rewrites workspace package dependencies to point to their packed `.tgz` files (so inter-workspace dependencies resolve correctly)
 4. **Packs all workspaces** — Runs `npm pack --workspaces` to create `.tgz` archives for every workspace package
@@ -117,8 +122,8 @@ Packed files are temporarily stored in `~/.lpck/packs/` and cleaned up after ins
 
 ## Notes
 
-- The source directory should be the **root** of an npm workspace (the directory containing the root `package.json` with a `workspaces` field)
-- Your target project's `package.json` should already list the workspace packages as dependencies
+- The source can be the **root** of an npm workspace (directory with a root `package.json` that has a `workspaces` field) or a **single package** directory
+- Your target project's `package.json` should already list those packages as dependencies (with the same names as in the source)
 
 ## License
 

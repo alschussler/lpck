@@ -3,9 +3,17 @@ import mapWorkspaces from "@npmcli/map-workspaces";
 import PackageJson from "@npmcli/package-json";
 
 import { spawn } from "node:child_process";
-import { existsSync, mkdirSync, readFileSync, rm, rmSync, writeFileSync } from "node:fs";
+import {
+  existsSync,
+  mkdirSync,
+  readdirSync,
+  readFileSync,
+  rm,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
 import path from "node:path";
-import os from 'node:os';
+import os from "node:os";
 import { parseArgs, type ParseArgsOptionsConfig } from "node:util";
 
 function bold(str: string) {
@@ -33,13 +41,13 @@ type LpckRC = {
     name: string;
     path: string;
     prepack: string;
-  }[]
-}
+  }[];
+};
 
 const homeDir = os.homedir();
-const LPCK_DIR = path.join(homeDir, '.lpck');
-const LPCK_PACK_DIR = path.join(LPCK_DIR, 'packs');
-const LPCK_RC_PATH = path.join(LPCK_DIR, '.lpckrc');
+const LPCK_DIR = path.join(homeDir, ".lpck");
+const LPCK_PACK_DIR = path.join(LPCK_DIR, "packs");
+const LPCK_RC_PATH = path.join(LPCK_DIR, ".lpckrc");
 
 async function pack(packageDir: string) {
   if (!existsSync(LPCK_PACK_DIR)) {
@@ -47,29 +55,54 @@ async function pack(packageDir: string) {
   }
 
   await new Promise<void>((resolve, reject) => {
-    console.log(dim('Packing...'), dim(`npm pack --pack-destination ${LPCK_PACK_DIR} --workspaces`));
+    console.log(
+      dim("Packing..."),
+      dim(`npm pack --pack-destination ${LPCK_PACK_DIR} --workspaces`)
+    );
 
-    const p = spawn("npm", ["pack", '--pack-destination', LPCK_PACK_DIR, '--workspaces' ], { stdio: ["ignore", "ignore", "inherit"], cwd: packageDir });
+    const p = spawn(
+      "npm",
+      ["pack", "--pack-destination", LPCK_PACK_DIR, "--workspaces"],
+      { stdio: ["ignore", "ignore", "inherit"], cwd: packageDir }
+    );
     p.on("exit", (code) => (code === 0 ? resolve() : reject(code)));
   });
 }
 
-async function install(targetPackageDir: string, dependenciesToInstall: string[]) {
-  console.log(dim('Installing dependencies...'), dim(`npm install ${dependenciesToInstall.join(' ')}`));
-  
+async function installAllPacks(packageDir: string) {
+  if (!existsSync(LPCK_PACK_DIR)) {
+    return;
+  }
+  const files = readdirSync(LPCK_PACK_DIR);
+  const tgzPaths = files
+    .filter((f) => f.endsWith(".tgz"))
+    .map((f) => path.join(LPCK_PACK_DIR, f));
+
+  if (tgzPaths.length === 0) {
+    return;
+  }
+
   await new Promise<void>((resolve, reject) => {
-    const p = spawn("npm", ["install", ...dependenciesToInstall ], { stdio: ["ignore", "ignore", "inherit"], cwd: targetPackageDir });
+    const p = spawn("npm", ["install", ...tgzPaths, "--no-save"], {
+      stdio: "inherit",
+      cwd: packageDir,
+    });
+
+    console.log(code(p.spawnargs.join(" ")));
     p.on("exit", (code) => (code === 0 ? resolve() : reject(code)));
   });
 }
 
 async function prepack(script: string, cwd: string) {
-  console.info('Executing prepack script...', dim(script));
+  console.info("Executing prepack script...", dim(script));
 
-  const [command, ...args] = script.split(' ');
+  const [command, ...args] = script.split(" ");
 
   await new Promise<void>((resolve, reject) => {
-    const p = spawn(command, args, { stdio: ["ignore", "ignore", "inherit"], cwd });
+    const p = spawn(command, args, {
+      stdio: ["ignore", "ignore", "inherit"],
+      cwd,
+    });
     p.on("exit", (code) => (code === 0 ? resolve() : reject(code)));
   });
 }
@@ -79,182 +112,290 @@ async function getPackageJson(packageDir: string) {
   return packageJson;
 }
 
-async function getPackName(packageJson: PackageJson) {
-  return `${packageJson.content.name}-${packageJson.content.version}.tgz`.replace(/@/g, '').replace(/\//g, '-');
+function getPackName(packageJson: PackageJson) {
+  return `${packageJson.content.name}-${packageJson.content.version}.tgz`
+    .replace(/@/g, "")
+    .replace(/\//g, "-");
 }
 
 function getPackDir(packName: string) {
   return path.join(LPCK_PACK_DIR, packName);
 }
 
+type DepsMap = PackageJson.Content["dependencies"];
+
 type WorkspaceInfo = {
   packageJson: PackageJson;
   packName: string;
-  oldDependencies: PackageJson.Content['dependencies'];
-}
+  oldDependencies: DepsMap;
+  oldDevDependencies: DepsMap;
+  oldPeerDependencies: DepsMap;
+};
 
 type AvailablePackage = {
   name: string;
   packName: string;
-}
+};
 
-class OriginPackage {
-  #originPackageDir: string;
+class WorkspaceHandler {
+  #rootDir: string;
 
-  #originPackage: PackageJson;
+  #packagesInfos = new Map<string, WorkspaceInfo>();
 
-  #workspacesInfos =  new Map<string, WorkspaceInfo>();
+  #rootPackage: PackageJson;
 
-  constructor(originPackageDir: string) {
-    this.#originPackageDir = originPackageDir;
+  #isWorkspace = false;
+
+  constructor(rootDir: string) {
+    this.#rootDir = rootDir;
   }
 
-  async load() {
-    console.info('Loading origin package...');
-    this.#originPackage = await getPackageJson(this.#originPackageDir);
+  async load(includeWorkspaceRoot = true) {
+    this.#rootPackage = await getPackageJson(this.#rootDir);
 
-    console.info('Origin package root loaded: ', bold(this.#originPackage.content.name));
-    console.info('Loading workspaces...');
-
-    const map = await mapWorkspaces({ pkg: this.#originPackage.content, cwd: this.#originPackageDir });
-
-    console.info('Workspaces loaded: ', dim(String(map.size)));
+    const map = await mapWorkspaces({
+      pkg: this.#rootPackage.content,
+      cwd: this.#rootDir,
+    });
 
     for (const [key, value] of map.entries()) {
       const packageJson = await getPackageJson(value);
-      this.#workspacesInfos.set(key, {
+      this.#packagesInfos.set(key, {
         packageJson,
-        packName: await getPackName(packageJson),
-        oldDependencies: structuredClone(packageJson.content.dependencies ?? {}),
+        packName: getPackName(packageJson),
+        oldDependencies: structuredClone(
+          packageJson.content.dependencies ?? {}
+        ),
+        oldDevDependencies: structuredClone(
+          packageJson.content.devDependencies ?? {}
+        ),
+        oldPeerDependencies: structuredClone(
+          packageJson.content.peerDependencies ?? {}
+        ),
+      });
+    }
+
+    this.#isWorkspace = map.size > 0;
+
+    if (includeWorkspaceRoot) {
+      this.#packagesInfos.set(this.#rootPackage.content.name, {
+        packageJson: this.#rootPackage,
+        packName: getPackName(this.#rootPackage),
+        oldDependencies: structuredClone(
+          this.#rootPackage.content.dependencies ?? {}
+        ),
+        oldDevDependencies: structuredClone(
+          this.#rootPackage.content.devDependencies ?? {}
+        ),
+        oldPeerDependencies: structuredClone(
+          this.#rootPackage.content.peerDependencies ?? {}
+        ),
       });
     }
   }
 
+  isWorkspace(): boolean {
+    return this.#isWorkspace;
+  }
+
+  getPackages(): PackageJson[] {
+    return Array.from(this.#packagesInfos.values()).map(
+      (packageInfo) => packageInfo.packageJson
+    );
+  }
+
+  getRootPackage(): PackageJson {
+    return this.#rootPackage;
+  }
+
+  getRootDir(): string {
+    return this.#rootDir;
+  }
+
+  async updateToLocalPacks(availablePackages?: AvailablePackage[]) {
+    const availableDependencies: AvailablePackage[] = availablePackages
+      ? availablePackages
+      : Array.from(this.#packagesInfos.values()).map((pck) => ({
+          name: pck.packageJson.content.name,
+          packName: getPackName(pck.packageJson),
+        }));
+
+    for (const packageInfo of this.#packagesInfos.values()) {
+      const workspacePackageJson = packageInfo.packageJson;
+      const content = workspacePackageJson.content;
+      let changed = false;
+
+      for (const depType of [
+        "dependencies",
+        "devDependencies",
+        "peerDependencies",
+      ] as const) {
+        const deps = content[depType];
+        if (!deps) continue;
+
+        const newDeps = structuredClone(deps);
+        for (const dependencyName of Object.keys(newDeps)) {
+          if (
+            availableDependencies.some((pck) => pck.name === dependencyName)
+          ) {
+            newDeps[dependencyName] = getPackDir(
+              availableDependencies.find((pck) => pck.name === dependencyName)!
+                .packName
+            );
+            changed = true;
+          }
+        }
+        content[depType] = newDeps;
+      }
+
+      if (changed) {
+        await workspacePackageJson.save();
+      }
+    }
+  }
+
+  async restore() {
+    for (const packageInfo of this.#packagesInfos.values()) {
+      const content = packageInfo.packageJson.content;
+
+      let changed = false;
+      if (Object.keys(packageInfo.oldDependencies).length > 0) {
+        content.dependencies = packageInfo.oldDependencies;
+        changed = true;
+      }
+      if (Object.keys(packageInfo.oldDevDependencies).length > 0) {
+        content.devDependencies = packageInfo.oldDevDependencies;
+        changed = true;
+      }
+      if (Object.keys(packageInfo.oldPeerDependencies).length > 0) {
+        content.peerDependencies = packageInfo.oldPeerDependencies;
+        changed = true;
+      }
+
+      if (changed) {
+        await packageInfo.packageJson.save();
+      }
+    }
+  }
+
+  async pack() {
+    await pack(this.#rootDir);
+  }
+}
+
+class OriginWorkspace {
+  #workspaceHandler: WorkspaceHandler;
+
+  constructor(originPackageDir: string) {
+    this.#workspaceHandler = new WorkspaceHandler(originPackageDir);
+  }
+
+  async load() {
+    console.info("Loading origin package...");
+
+    await this.#workspaceHandler.load(false);
+
+    const rootPackage = this.#workspaceHandler.getRootPackage();
+
+    console.info(
+      "Origin package root loaded: ",
+      bold(rootPackage.content.name)
+    );
+    console.info("Loading workspaces...");
+
+    console.info(
+      "Workspaces loaded: ",
+      dim(String(this.#workspaceHandler.getPackages().length))
+    );
+  }
+
   getAvailablePackages(): AvailablePackage[] {
-    return Array.from(this.#workspacesInfos.values()).map((workspaceInfo) => ({
-      name: workspaceInfo.packageJson.content.name,
-      packName: workspaceInfo.packName,
+    return this.#workspaceHandler.getPackages().map((packageJson) => ({
+      name: packageJson.content.name,
+      packName: getPackName(packageJson),
     }));
   }
 
   async pack() {
-    await pack(this.#originPackageDir);
+    await this.#workspaceHandler.pack();
   }
 
   async updateDependencies() {
-    console.info('Updating workspaces dependencies to locally packed packages...');
+    console.info(
+      "Updating workspaces dependencies to locally packed packages..."
+    );
 
-    for (const workspaceInfo of this.#workspacesInfos.values()) {
-      const workspacePackageJson = workspaceInfo.packageJson;
-      if (!workspacePackageJson.content.dependencies) {
-        continue;
-      }
-  
-      const newDependencies = structuredClone(workspacePackageJson.content.dependencies);
-  
-      for (const dependencyName of Object.keys(newDependencies)) {
-        if (this.#workspacesInfos.has(dependencyName)) {
-          newDependencies[dependencyName] = getPackDir(this.#workspacesInfos.get(dependencyName)!.packName);
-        }
-      }
-  
-      workspacePackageJson.content.dependencies = newDependencies;
-      await workspacePackageJson.save();
-      console.info('Workspace dependency updated: ', bold(workspacePackageJson.content.name));
-    }
+    await this.#workspaceHandler.updateToLocalPacks();
   }
 
   async restoreDependencies() {
-    console.info('Restoring workspaces dependencies to original dependencies...');
-    
-    for (const workspaceInfo of this.#workspacesInfos.values()) {
-      if (Object.keys(workspaceInfo.oldDependencies).length === 0) {
-        continue;
-      }
+    console.info(
+      "Restoring workspaces dependencies to original dependencies..."
+    );
 
-      console.info('Restoring: ', bold(workspaceInfo.packageJson.content.name));
-      workspaceInfo.packageJson.content.dependencies = workspaceInfo.oldDependencies;
-      await workspaceInfo.packageJson.save();
-    }
+    await this.#workspaceHandler.restore();
 
-    console.info('Workspaces dependencies restored to original dependencies');
+    console.info("Workspaces dependencies restored to original dependencies");
   }
 }
 
-class TargetPackage {
-  #targetPackageDir: string;
-
-  #targetPackage: PackageJson;
+class TargetWorkspace {
+  #workspaceHandler: WorkspaceHandler;
 
   constructor(targetPackageDir: string) {
-    this.#targetPackageDir = targetPackageDir;
+    this.#workspaceHandler = new WorkspaceHandler(targetPackageDir);
   }
 
   async load() {
-    console.info('Loading target package...');
-    this.#targetPackage = await getPackageJson(this.#targetPackageDir);
-    console.info('Target package loaded: ', bold(this.#targetPackage.content.name));
+    console.info("Loading target package...");
+
+    await this.#workspaceHandler.load();
+
+    const rootPackage = this.#workspaceHandler.getRootPackage();
+
+    console.info("Target package loaded: ", bold(rootPackage.content.name));
   }
 
   async install(availablePackages: AvailablePackage[]) {
-    console.info('Installing dependencies...');
+    await this.#workspaceHandler.updateToLocalPacks(availablePackages);
 
-    const dependencies = this.#targetPackage.content.dependencies;
-    if (!dependencies) {
-      console.info('No dependencies found in target package');
-      return;
-    }
+    await installAllPacks(this.#workspaceHandler.getRootDir());
 
-    const dependencyNames = Object.keys(dependencies);
-
-    const dependenciesToInstal = availablePackages.filter(availablePackage => dependencyNames.includes(availablePackage.name));
-    const packDirs = dependenciesToInstal.map(availablePackage => getPackDir(availablePackage.packName));
-
-    if (dependenciesToInstal.length === 0) {
-      console.info('No dependencies to install found in target package');
-      return;
-    }
-
-    console.info(`Installing dependencies: \n\t- ${dependenciesToInstal.map(d => bold(d.name)).join('\n\t- ')}`);
-
-    await install(this.#targetPackageDir, packDirs);
-
-    console.info('Dependencies installed');
+    console.info("Dependencies installed");
   }
-  
 }
 
 const ARGS_OPTIONS = {
   preset: {
-    type: 'string',
-    short: 'p',
+    type: "string",
+    short: "p",
   },
   help: {
-    type: 'boolean',
-    short: 'h',
+    type: "boolean",
+    short: "h",
     default: false,
   },
   printPresets: {
-    type: 'boolean',
+    type: "boolean",
     default: false,
   },
   init: {
-    type: 'boolean',
+    type: "boolean",
     default: false,
   },
   noPrepack: {
-    type: 'boolean',
+    type: "boolean",
     default: false,
-  }
+  },
 } satisfies ParseArgsOptionsConfig;
 
-type Command = keyof typeof ARGS_OPTIONS | 'install';
+type Command = keyof typeof ARGS_OPTIONS | "install";
 
 type ExecutionArgs = {
   command: Command;
   path?: string;
   noPrepack?: boolean;
-}
+};
 
 class LPCK {
   #lpckRc: LpckRC;
@@ -274,12 +415,12 @@ class LPCK {
   }
 
   #loadRC() {
-     if (!existsSync(LPCK_RC_PATH)) {
+    if (!existsSync(LPCK_RC_PATH)) {
       this.#lpckRc = { presets: [] };
       return;
-     }
+    }
 
-     this.#lpckRc = JSON.parse(readFileSync(LPCK_RC_PATH, 'utf8')) as LpckRC;
+    this.#lpckRc = JSON.parse(readFileSync(LPCK_RC_PATH, "utf8")) as LpckRC;
   }
 
   #loadArgs(args: string[]) {
@@ -295,7 +436,7 @@ class LPCK {
 
     if (preset) {
       this.#args = {
-        command: 'preset',
+        command: "preset",
         path: preset,
         noPrepack,
       };
@@ -305,7 +446,7 @@ class LPCK {
 
     if (printPresets) {
       this.#args = {
-        command: 'printPresets',
+        command: "printPresets",
       };
 
       return;
@@ -313,7 +454,7 @@ class LPCK {
 
     if (init) {
       this.#args = {
-        command: 'init',
+        command: "init",
       };
 
       return;
@@ -321,7 +462,7 @@ class LPCK {
 
     if (hasPositionals) {
       this.#args = {
-        command: 'install',
+        command: "install",
         path: parsedArgs.positionals[0],
       };
 
@@ -329,59 +470,73 @@ class LPCK {
     }
 
     this.#args = {
-      command: 'help',
+      command: "help",
     };
   }
 
   #cleanUpPacks() {
     if (existsSync(LPCK_PACK_DIR)) {
+      console.info("Cleaning up packs...");
       rmSync(LPCK_PACK_DIR, { recursive: true });
     }
   }
 
   #help() {
-    console.info('Usage:', code('lpck <workspace-root-package-dir>'), 'or', code('lpck [options]'));
-    console.info('Options:');
-    console.info('  -h, --help: Show this help');
-    console.info('  -p, --preset: The preset to use');
-    console.info('  --printPresets: Print the presets');
-    console.info('  --init: Initialize the LPCK RC');
-    console.info('  --noPrepack: Do not execute the prepack script');
+    console.info(
+      "Usage:",
+      code("lpck <workspace-root-package-dir>"),
+      "or",
+      code("lpck [options]")
+    );
+    console.info("Options:");
+    console.info("  -h, --help: Show this help");
+    console.info("  -p, --preset: The preset to use");
+    console.info("  --printPresets: Print the presets");
+    console.info("  --init: Initialize the LPCK RC");
+    console.info("  --noPrepack: Do not execute the prepack script");
   }
 
   #printPresets() {
     if (this.#lpckRc.presets.length === 0) {
-      console.info('No presets found at: ', LPCK_RC_PATH);
+      console.info("No presets found at: ", LPCK_RC_PATH);
       return;
     }
 
-    console.info(code(LPCK_RC_PATH), ': ', JSON.stringify(this.#lpckRc, null, 2));
+    console.info(
+      code(LPCK_RC_PATH),
+      ": ",
+      JSON.stringify(this.#lpckRc, null, 2)
+    );
   }
 
   #initRC() {
-    console.info('Initializing LPCK RC...');
+    console.info("Initializing LPCK RC...");
 
     if (existsSync(LPCK_RC_PATH)) {
-      console.error('LPCK RC already exists at: ', LPCK_RC_PATH);
+      console.error("LPCK RC already exists at: ", LPCK_RC_PATH);
       process.exit(1);
       return;
     }
 
-    const mockRc: LpckRC = { presets: [{
-      name: '<preset-name>',
-      path: '<preset-path>',
-      prepack: '<prepack-script>',
-    }] };
+    const mockRc: LpckRC = {
+      presets: [
+        {
+          name: "<preset-name>",
+          path: "<preset-path>",
+          prepack: "<prepack-script>",
+        },
+      ],
+    };
 
     writeFileSync(LPCK_RC_PATH, JSON.stringify(mockRc, null, 2));
-    console.info('LPCK RC initialized at: ', LPCK_RC_PATH);
+    console.info("LPCK RC initialized at: ", LPCK_RC_PATH);
   }
 
   async #install(originPackageDir: string) {
-    const targetPackage = new TargetPackage(process.cwd());
-    const originPackage = new OriginPackage(originPackageDir);
+    const targetPackage = new TargetWorkspace(process.cwd());
+    const originPackage = new OriginWorkspace(originPackageDir);
     await originPackage.load();
-    
+
     try {
       await originPackage.updateDependencies();
       await originPackage.pack();
@@ -390,21 +545,21 @@ class LPCK {
     } finally {
       await originPackage.restoreDependencies();
     }
-    
+
     await targetPackage.load();
     await targetPackage.install(originPackage.getAvailablePackages());
 
     this.#cleanUpPacks();
-    console.info(green('Done'));
+    console.info(green("Done"));
   }
 
   async #preset(name: string) {
-    console.info('Loading preset: ', code(name));
+    console.info("Loading preset: ", code(name));
 
-    const preset = this.#lpckRc.presets.find(preset => preset.name === name);
+    const preset = this.#lpckRc.presets.find((preset) => preset.name === name);
 
     if (!preset) {
-      console.error('Preset ', code(name), ' not found');
+      console.error("Preset ", code(name), " not found");
       process.exit(1);
       return;
     }
@@ -418,19 +573,19 @@ class LPCK {
 
   async run() {
     switch (this.#args.command) {
-      case 'install':
+      case "install":
         await this.#install(this.#args.path!);
         break;
-      case 'preset':
+      case "preset":
         await this.#preset(this.#args.path!);
         break;
-      case 'printPresets':
+      case "printPresets":
         this.#printPresets();
         break;
-      case 'help':
+      case "help":
         this.#help();
         break;
-      case 'init':
+      case "init":
         this.#initRC();
         break;
       default:
@@ -440,4 +595,4 @@ class LPCK {
   }
 }
 
-await (new LPCK()).run();
+await new LPCK().run();
