@@ -486,6 +486,7 @@ class LPCK {
       this.#args = {
         command: "preset",
         path: preset,
+        rawInstall,
         prepack,
         dev,
         peer,
