@@ -141,6 +141,11 @@ type AvailablePackage = {
   packName: string;
 };
 
+type UpdateToLocalPacksOptions = {
+  dev?: boolean;
+  peer?: boolean;
+};
+
 class WorkspaceHandler {
   #rootDir: string;
 
@@ -216,7 +221,18 @@ class WorkspaceHandler {
     return this.#rootDir;
   }
 
-  async updateToLocalPacks(availablePackages?: AvailablePackage[]) {
+  async updateToLocalPacks(
+    availablePackages?: AvailablePackage[],
+    options?: UpdateToLocalPacksOptions,
+  ) {
+    const depTypes = ["dependencies"];
+    if (options?.dev) {
+      depTypes.push("devDependencies");
+    }
+    if (options?.peer) {
+      depTypes.push("peerDependencies");
+    }
+
     const availableDependencies: AvailablePackage[] = availablePackages
       ? availablePackages
       : Array.from(this.#packagesInfos.values()).map((pck) => ({
@@ -231,11 +247,7 @@ class WorkspaceHandler {
       const content = workspacePackageJson.content;
       let changed = false;
 
-      for (const depType of [
-        "dependencies",
-        "devDependencies",
-        "peerDependencies",
-      ] as const) {
+      for (const depType of depTypes) {
         const deps = content[depType];
         if (!deps) continue;
 
@@ -348,6 +360,10 @@ class OriginWorkspace {
   }
 }
 
+type InstallOptions = {
+  rawInstall: boolean;
+} & UpdateToLocalPacksOptions;
+
 class TargetWorkspace {
   #workspaceHandler: WorkspaceHandler;
 
@@ -365,10 +381,16 @@ class TargetWorkspace {
     console.info("Target package loaded: ", bold(rootPackage.content.name));
   }
 
-  async install(availablePackages: AvailablePackage[], rawInstall: boolean) {
-    await this.#workspaceHandler.updateToLocalPacks(availablePackages);
+  async install(
+    availablePackages: AvailablePackage[],
+    options: InstallOptions,
+  ) {
+    await this.#workspaceHandler.updateToLocalPacks(availablePackages, options);
 
-    await installAllPacks(this.#workspaceHandler.getRootDir(), rawInstall);
+    await installAllPacks(
+      this.#workspaceHandler.getRootDir(),
+      options.rawInstall,
+    );
 
     console.info("Dependencies installed");
   }
@@ -392,7 +414,15 @@ const ARGS_OPTIONS = {
     type: "boolean",
     default: false,
   },
-  noPrepack: {
+  prepack: {
+    type: "boolean",
+    default: false,
+  },
+  dev: {
+    type: "boolean",
+    default: false,
+  },
+  peer: {
     type: "boolean",
     default: false,
   },
@@ -407,7 +437,9 @@ type Command = keyof typeof ARGS_OPTIONS | "install";
 type ExecutionArgs = {
   command: Command;
   path?: string;
-  noPrepack?: boolean;
+  prepack?: boolean;
+  dev?: boolean;
+  peer?: boolean;
   rawInstall?: boolean;
 };
 
@@ -443,9 +475,10 @@ class LPCK {
       options: ARGS_OPTIONS,
       allowPositionals: true,
       strict: true,
+      allowNegative: true,
     });
 
-    const { preset, printPresets, init, noPrepack, rawInstall } =
+    const { preset, printPresets, init, prepack, rawInstall, dev, peer } =
       parsedArgs.values;
     const hasPositionals = parsedArgs.positionals.length === 1;
 
@@ -453,7 +486,9 @@ class LPCK {
       this.#args = {
         command: "preset",
         path: preset,
-        noPrepack,
+        prepack,
+        dev,
+        peer,
       };
 
       return;
@@ -480,6 +515,8 @@ class LPCK {
         command: "install",
         path: parsedArgs.positionals[0],
         rawInstall,
+        dev,
+        peer,
       };
 
       return;
@@ -509,7 +546,9 @@ class LPCK {
     console.info("  -p, --preset: The preset to use");
     console.info("  --printPresets: Print the presets");
     console.info("  --init: Initialize the LPCK RC");
-    console.info("  --noPrepack: Do not execute the prepack script");
+    console.info("  --prepack: Whether to execute the prepack script");
+    console.info("  --dev: Whether to include dev dependencies");
+    console.info("  --peer: Whether to include peer dependencies");
     console.info(
       "  --rawInstall: Run install without specifying the packages to install",
     );
@@ -566,10 +605,11 @@ class LPCK {
     }
 
     await targetPackage.load();
-    await targetPackage.install(
-      originPackage.getAvailablePackages(),
-      this.#args.rawInstall,
-    );
+    await targetPackage.install(originPackage.getAvailablePackages(), {
+      dev: this.#args.dev,
+      peer: this.#args.peer,
+      rawInstall: this.#args.rawInstall,
+    });
 
     this.#cleanUpPacks();
     console.info(green("Done"));
@@ -586,7 +626,7 @@ class LPCK {
       return;
     }
 
-    if (preset.prepack && !this.#args.noPrepack) {
+    if (preset.prepack && this.#args.prepack) {
       await prepack(preset.prepack, preset.path);
     }
 

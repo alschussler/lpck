@@ -41,6 +41,12 @@ lpck ~/projects/my-component-library
 
 # Or from a single package
 lpck ~/projects/my-package
+
+# Also update devDependencies and/or peerDependencies to local packs
+lpck ~/projects/my-component-library --dev --peer
+
+# Run install without specifying packs (e.g. after editing package.json manually)
+lpck ~/projects/my-component-library --rawInstall
 ```
 
 ### Using Presets
@@ -48,15 +54,15 @@ lpck ~/projects/my-package
 Presets let you save frequently used workspace paths and optional prepack scripts. Configuration is stored in `~/.lpck/.lpckrc`.
 
 ```bash
-  # Initialize the config file (creates ~/.lpck/.lpckrc with a template)
-  lpck --init
+# Initialize the config file (creates ~/.lpck/.lpckrc with a template)
+lpck --init
 
 # Use a preset
 lpck -p my-preset
 lpck --preset my-preset
 
-# Use a preset but skip the prepack script
-lpck -p my-preset --noPrepack
+# Use a preset and run its prepack script before packing
+lpck -p my-preset --prepack
 
 # List all presets
 lpck --printPresets
@@ -64,13 +70,16 @@ lpck --printPresets
 
 ### CLI Options
 
-| Option            | Short | Description                                 |
-| ----------------- | ----- | ------------------------------------------- |
-| `--help`          | `-h`  | Show help information                       |
-| `--preset <name>` | `-p`  | Use a saved preset                          |
-| `--printPresets`  |       | Print all configured presets                |
-| `--init`          |       | Initialize the `.lpckrc` config file        |
-| `--noPrepack`     |       | Skip the prepack script when using a preset |
+| Option            | Short | Description                                                                |
+| ----------------- | ----- | -------------------------------------------------------------------------- |
+| `--help`          | `-h`  | Show help information                                                      |
+| `--preset <name>` | `-p`  | Use a saved preset                                                         |
+| `--printPresets`  |       | Print all configured presets                                               |
+| `--init`          |       | Initialize the `.lpckrc` config file                                       |
+| `--prepack`       |       | Run the preset's prepack script before packing (when using a preset)       |
+| `--dev`           |       | Also update and install devDependencies to local packs                     |
+| `--peer`          |       | Also update and install peerDependencies to local packs                    |
+| `--rawInstall`    |       | Run `npm install` without passing pack paths (install from existing state) |
 
 ## Configuration
 
@@ -101,7 +110,7 @@ The configuration file is located at `~/.lpck/.lpckrc` and uses JSON format:
 `lpck` performs the following steps:
 
 1. **Maps workspaces** — Scans the source directory and discovers all workspace packages (or treats it as a single package if there are no workspaces)
-2. **Runs prepack** — If using a preset with a prepack script, executes it first
+2. **Runs prepack** — If using a preset with a prepack script and the `--prepack` flag, runs that script first
 3. **Updates internal dependencies** — Temporarily rewrites workspace package dependencies to point to their packed `.tgz` files (so inter-workspace dependencies resolve correctly)
 4. **Packs all workspaces** — Runs `npm pack --workspaces` to create `.tgz` archives for every workspace package
 5. **Restores original dependencies** — Reverts the temporary dependency changes in the source workspace
