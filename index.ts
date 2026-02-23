@@ -57,19 +57,19 @@ async function pack(packageDir: string) {
   await new Promise<void>((resolve, reject) => {
     console.log(
       dim("Packing..."),
-      dim(`npm pack --pack-destination ${LPCK_PACK_DIR} --workspaces`)
+      dim(`npm pack --pack-destination ${LPCK_PACK_DIR} --workspaces`),
     );
 
     const p = spawn(
       "npm",
       ["pack", "--pack-destination", LPCK_PACK_DIR, "--workspaces"],
-      { stdio: ["ignore", "ignore", "inherit"], cwd: packageDir }
+      { stdio: ["ignore", "ignore", "inherit"], cwd: packageDir },
     );
     p.on("exit", (code) => (code === 0 ? resolve() : reject(code)));
   });
 }
 
-async function installAllPacks(packageDir: string) {
+async function installAllPacks(packageDir: string, rawInstall?: boolean) {
   if (!existsSync(LPCK_PACK_DIR)) {
     return;
   }
@@ -83,10 +83,14 @@ async function installAllPacks(packageDir: string) {
   }
 
   await new Promise<void>((resolve, reject) => {
-    const p = spawn("npm", ["install", ...tgzPaths, "--no-save"], {
-      stdio: "inherit",
-      cwd: packageDir,
-    });
+    const p = spawn(
+      "npm",
+      ["install", ...(rawInstall ? [] : tgzPaths), "--no-save"],
+      {
+        stdio: "inherit",
+        cwd: packageDir,
+      },
+    );
 
     console.log(code(p.spawnargs.join(" ")));
     p.on("exit", (code) => (code === 0 ? resolve() : reject(code)));
@@ -164,13 +168,13 @@ class WorkspaceHandler {
         packageJson,
         packName: getPackName(packageJson),
         oldDependencies: structuredClone(
-          packageJson.content.dependencies ?? {}
+          packageJson.content.dependencies ?? {},
         ),
         oldDevDependencies: structuredClone(
-          packageJson.content.devDependencies ?? {}
+          packageJson.content.devDependencies ?? {},
         ),
         oldPeerDependencies: structuredClone(
-          packageJson.content.peerDependencies ?? {}
+          packageJson.content.peerDependencies ?? {},
         ),
       });
     }
@@ -182,13 +186,13 @@ class WorkspaceHandler {
         packageJson: this.#rootPackage,
         packName: getPackName(this.#rootPackage),
         oldDependencies: structuredClone(
-          this.#rootPackage.content.dependencies ?? {}
+          this.#rootPackage.content.dependencies ?? {},
         ),
         oldDevDependencies: structuredClone(
-          this.#rootPackage.content.devDependencies ?? {}
+          this.#rootPackage.content.devDependencies ?? {},
         ),
         oldPeerDependencies: structuredClone(
-          this.#rootPackage.content.peerDependencies ?? {}
+          this.#rootPackage.content.peerDependencies ?? {},
         ),
       });
     }
@@ -200,7 +204,7 @@ class WorkspaceHandler {
 
   getPackages(): PackageJson[] {
     return Array.from(this.#packagesInfos.values()).map(
-      (packageInfo) => packageInfo.packageJson
+      (packageInfo) => packageInfo.packageJson,
     );
   }
 
@@ -220,6 +224,8 @@ class WorkspaceHandler {
           packName: getPackName(pck.packageJson),
         }));
 
+    const used = [];
+
     for (const packageInfo of this.#packagesInfos.values()) {
       const workspacePackageJson = packageInfo.packageJson;
       const content = workspacePackageJson.content;
@@ -238,10 +244,11 @@ class WorkspaceHandler {
           if (
             availableDependencies.some((pck) => pck.name === dependencyName)
           ) {
-            newDeps[dependencyName] = getPackDir(
-              availableDependencies.find((pck) => pck.name === dependencyName)!
-                .packName
-            );
+            const depToUse = availableDependencies.find(
+              (pck) => pck.name === dependencyName,
+            )!;
+            used.push(depToUse.name);
+            newDeps[dependencyName] = getPackDir(depToUse.packName);
             changed = true;
           }
         }
@@ -251,6 +258,8 @@ class WorkspaceHandler {
       if (changed) {
         await workspacePackageJson.save();
       }
+
+      return used;
     }
   }
 
@@ -299,13 +308,13 @@ class OriginWorkspace {
 
     console.info(
       "Origin package root loaded: ",
-      bold(rootPackage.content.name)
+      bold(rootPackage.content.name),
     );
     console.info("Loading workspaces...");
 
     console.info(
       "Workspaces loaded: ",
-      dim(String(this.#workspaceHandler.getPackages().length))
+      dim(String(this.#workspaceHandler.getPackages().length)),
     );
   }
 
@@ -322,7 +331,7 @@ class OriginWorkspace {
 
   async updateDependencies() {
     console.info(
-      "Updating workspaces dependencies to locally packed packages..."
+      "Updating workspaces dependencies to locally packed packages...",
     );
 
     await this.#workspaceHandler.updateToLocalPacks();
@@ -330,7 +339,7 @@ class OriginWorkspace {
 
   async restoreDependencies() {
     console.info(
-      "Restoring workspaces dependencies to original dependencies..."
+      "Restoring workspaces dependencies to original dependencies...",
     );
 
     await this.#workspaceHandler.restore();
@@ -356,10 +365,10 @@ class TargetWorkspace {
     console.info("Target package loaded: ", bold(rootPackage.content.name));
   }
 
-  async install(availablePackages: AvailablePackage[]) {
+  async install(availablePackages: AvailablePackage[], rawInstall: boolean) {
     await this.#workspaceHandler.updateToLocalPacks(availablePackages);
 
-    await installAllPacks(this.#workspaceHandler.getRootDir());
+    await installAllPacks(this.#workspaceHandler.getRootDir(), rawInstall);
 
     console.info("Dependencies installed");
   }
@@ -387,6 +396,10 @@ const ARGS_OPTIONS = {
     type: "boolean",
     default: false,
   },
+  rawInstall: {
+    type: "boolean",
+    default: false,
+  },
 } satisfies ParseArgsOptionsConfig;
 
 type Command = keyof typeof ARGS_OPTIONS | "install";
@@ -395,6 +408,7 @@ type ExecutionArgs = {
   command: Command;
   path?: string;
   noPrepack?: boolean;
+  rawInstall?: boolean;
 };
 
 class LPCK {
@@ -431,7 +445,8 @@ class LPCK {
       strict: true,
     });
 
-    const { preset, printPresets, init, noPrepack } = parsedArgs.values;
+    const { preset, printPresets, init, noPrepack, rawInstall } =
+      parsedArgs.values;
     const hasPositionals = parsedArgs.positionals.length === 1;
 
     if (preset) {
@@ -464,6 +479,7 @@ class LPCK {
       this.#args = {
         command: "install",
         path: parsedArgs.positionals[0],
+        rawInstall,
       };
 
       return;
@@ -486,7 +502,7 @@ class LPCK {
       "Usage:",
       code("lpck <workspace-root-package-dir>"),
       "or",
-      code("lpck [options]")
+      code("lpck [options]"),
     );
     console.info("Options:");
     console.info("  -h, --help: Show this help");
@@ -494,6 +510,9 @@ class LPCK {
     console.info("  --printPresets: Print the presets");
     console.info("  --init: Initialize the LPCK RC");
     console.info("  --noPrepack: Do not execute the prepack script");
+    console.info(
+      "  --rawInstall: Run install without specifying the packages to install",
+    );
   }
 
   #printPresets() {
@@ -505,7 +524,7 @@ class LPCK {
     console.info(
       code(LPCK_RC_PATH),
       ": ",
-      JSON.stringify(this.#lpckRc, null, 2)
+      JSON.stringify(this.#lpckRc, null, 2),
     );
   }
 
@@ -547,7 +566,10 @@ class LPCK {
     }
 
     await targetPackage.load();
-    await targetPackage.install(originPackage.getAvailablePackages());
+    await targetPackage.install(
+      originPackage.getAvailablePackages(),
+      this.#args.rawInstall,
+    );
 
     this.#cleanUpPacks();
     console.info(green("Done"));
