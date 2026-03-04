@@ -63,7 +63,7 @@ async function pack(packageDir: string) {
     const p = spawn(
       "npm",
       ["pack", "--pack-destination", LPCK_PACK_DIR, "--workspaces"],
-      { stdio: ["ignore", "ignore", "inherit"], cwd: packageDir },
+      { stdio: ["ignore", "ignore", "ignore"], cwd: packageDir },
     );
     p.on("exit", (code) => (code === 0 ? resolve() : reject(code)));
   });
@@ -249,16 +249,17 @@ class WorkspaceHandler {
 
       for (const depType of depTypes) {
         const deps = content[depType];
-        if (!deps) continue;
+        if (!deps) {
+          continue;
+        }
 
         const newDeps = structuredClone(deps);
         for (const dependencyName of Object.keys(newDeps)) {
-          if (
-            availableDependencies.some((pck) => pck.name === dependencyName)
-          ) {
-            const depToUse = availableDependencies.find(
-              (pck) => pck.name === dependencyName,
-            )!;
+          const depToUse = availableDependencies.find(
+            (pck) => pck.name === dependencyName,
+          );
+
+          if (depToUse) {
             used.push(depToUse.name);
             newDeps[dependencyName] = getPackDir(depToUse.packName);
             changed = true;
@@ -270,9 +271,9 @@ class WorkspaceHandler {
       if (changed) {
         await workspacePackageJson.save();
       }
-
-      return used;
     }
+
+    return used;
   }
 
   async restore() {
@@ -341,12 +342,12 @@ class OriginWorkspace {
     await this.#workspaceHandler.pack();
   }
 
-  async updateDependencies() {
+  async updateDependencies(options?: UpdateToLocalPacksOptions) {
     console.info(
       "Updating workspaces dependencies to locally packed packages...",
     );
 
-    await this.#workspaceHandler.updateToLocalPacks();
+    await this.#workspaceHandler.updateToLocalPacks(undefined, options);
   }
 
   async restoreDependencies() {
@@ -597,7 +598,10 @@ class LPCK {
     await originPackage.load();
 
     try {
-      await originPackage.updateDependencies();
+      await originPackage.updateDependencies({
+        dev: this.#args.dev,
+        peer: this.#args.peer,
+      });
       await originPackage.pack();
     } catch (error) {
       console.error(red(String(error)));
