@@ -80,6 +80,7 @@ lpck --printPresets
 | `--dev`           |       | Also update and install devDependencies to local packs                     |
 | `--peer`          |       | Also update and install peerDependencies to local packs                    |
 | `--rawInstall`    |       | Run `npm install` without passing pack paths (install from existing state) |
+| `--clean`         |       | Remove all packed `.tgz` files from `~/.lpck/packs/`                       |
 
 ## Configuration
 
@@ -115,9 +116,8 @@ The configuration file is located at `~/.lpck/.lpckrc` and uses JSON format:
 4. **Packs all workspaces** — Runs `npm pack --workspaces` to create `.tgz` archives for every workspace package
 5. **Restores original dependencies** — Reverts the temporary dependency changes in the source workspace
 6. **Installs into target** — Identifies which packed packages are dependencies of your target project and installs them
-7. **Cleans up** — Removes the temporary `.tgz` files
 
-Packed files are temporarily stored in `~/.lpck/packs/` and cleaned up after installation.
+Packed files are stored in `~/.lpck/packs/` and persist between runs. Use `lpck --clean` to remove them manually.
 
 ## Key Features
 

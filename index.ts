@@ -14,7 +14,7 @@ import {
 } from "node:fs";
 import path from "node:path";
 import os from "node:os";
-import { parseArgs, type ParseArgsOptionsConfig } from "node:util";
+import { parseArgs, type ParseArgsOptionDescriptor } from "node:util";
 
 function bold(str: string) {
   return `\x1b[1m${str}\x1b[0m`;
@@ -36,6 +36,12 @@ function code(str: string) {
   return `\x1b[33m${str}\x1b[0m`;
 }
 
+type CliArgDescription = ParseArgsOptionDescriptor & {
+  description: string;
+};
+
+type CliArgs = Record<string, CliArgDescription>;
+
 type LpckRC = {
   presets: {
     name: string;
@@ -48,6 +54,10 @@ const homeDir = os.homedir();
 const LPCK_DIR = path.join(homeDir, ".lpck");
 const LPCK_PACK_DIR = path.join(LPCK_DIR, "packs");
 const LPCK_RC_PATH = path.join(LPCK_DIR, ".lpckrc");
+
+function getPackageName(packageJson: PackageJson) {
+  return packageJson.content.name ?? "<NO-NAME>";
+}
 
 async function pack(packageDir: string) {
   if (!existsSync(LPCK_PACK_DIR)) {
@@ -117,7 +127,7 @@ async function getPackageJson(packageDir: string) {
 }
 
 function getPackName(packageJson: PackageJson) {
-  return `${packageJson.content.name}-${packageJson.content.version}.tgz`
+  return `${getPackageName(packageJson)}-${packageJson.content.version}.tgz`
     .replace(/@/g, "")
     .replace(/\//g, "-");
 }
@@ -151,7 +161,7 @@ class WorkspaceHandler {
 
   #packagesInfos = new Map<string, WorkspaceInfo>();
 
-  #rootPackage: PackageJson;
+  #rootPackage: PackageJson | null = null;
 
   #isWorkspace = false;
 
@@ -187,7 +197,7 @@ class WorkspaceHandler {
     this.#isWorkspace = map.size > 0;
 
     if (includeWorkspaceRoot) {
-      this.#packagesInfos.set(this.#rootPackage.content.name, {
+      this.#packagesInfos.set(getPackageName(this.#rootPackage), {
         packageJson: this.#rootPackage,
         packName: getPackName(this.#rootPackage),
         oldDependencies: structuredClone(
@@ -214,6 +224,10 @@ class WorkspaceHandler {
   }
 
   getRootPackage(): PackageJson {
+    if (!this.#rootPackage) {
+      throw new Error("Root package not loaded");
+    }
+    
     return this.#rootPackage;
   }
 
@@ -236,9 +250,9 @@ class WorkspaceHandler {
     const availableDependencies: AvailablePackage[] = availablePackages
       ? availablePackages
       : Array.from(this.#packagesInfos.values()).map((pck) => ({
-          name: pck.packageJson.content.name,
+          name: getPackageName(pck.packageJson),
           packName: getPackName(pck.packageJson),
-        }));
+        })) as AvailablePackage[];
 
     const used = [];
 
@@ -253,7 +267,7 @@ class WorkspaceHandler {
           continue;
         }
 
-        const newDeps = structuredClone(deps);
+        const newDeps = structuredClone<Record<string, string>>(deps as Record<string, string>);
         for (const dependencyName of Object.keys(newDeps)) {
           const depToUse = availableDependencies.find(
             (pck) => pck.name === dependencyName,
@@ -281,15 +295,15 @@ class WorkspaceHandler {
       const content = packageInfo.packageJson.content;
 
       let changed = false;
-      if (Object.keys(packageInfo.oldDependencies).length > 0) {
+      if (Object.keys(packageInfo.oldDependencies ?? {}).length > 0) {
         content.dependencies = packageInfo.oldDependencies;
         changed = true;
       }
-      if (Object.keys(packageInfo.oldDevDependencies).length > 0) {
+      if (Object.keys(packageInfo.oldDevDependencies ?? {}).length > 0) {
         content.devDependencies = packageInfo.oldDevDependencies;
         changed = true;
       }
-      if (Object.keys(packageInfo.oldPeerDependencies).length > 0) {
+      if (Object.keys(packageInfo.oldPeerDependencies ?? {}).length > 0) {
         content.peerDependencies = packageInfo.oldPeerDependencies;
         changed = true;
       }
@@ -321,7 +335,7 @@ class OriginWorkspace {
 
     console.info(
       "Origin package root loaded: ",
-      bold(rootPackage.content.name),
+      bold(getPackageName(rootPackage)),
     );
     console.info("Loading workspaces...");
 
@@ -333,7 +347,7 @@ class OriginWorkspace {
 
   getAvailablePackages(): AvailablePackage[] {
     return this.#workspaceHandler.getPackages().map((packageJson) => ({
-      name: packageJson.content.name,
+      name: getPackageName(packageJson),
       packName: getPackName(packageJson),
     }));
   }
@@ -362,7 +376,7 @@ class OriginWorkspace {
 }
 
 type InstallOptions = {
-  rawInstall: boolean;
+  rawInstall?: boolean;
 } & UpdateToLocalPacksOptions;
 
 class TargetWorkspace {
@@ -379,7 +393,7 @@ class TargetWorkspace {
 
     const rootPackage = this.#workspaceHandler.getRootPackage();
 
-    console.info("Target package loaded: ", bold(rootPackage.content.name));
+    console.info("Target package loaded: ", bold(getPackageName(rootPackage)));
   }
 
   async install(
@@ -401,37 +415,50 @@ const ARGS_OPTIONS = {
   preset: {
     type: "string",
     short: "p",
+    description: "Use a saved preset",
   },
   help: {
     type: "boolean",
     short: "h",
     default: false,
+    description: "Show this help",
   },
   printPresets: {
     type: "boolean",
     default: false,
+    description: "Print all configured presets",
   },
   init: {
     type: "boolean",
     default: false,
+    description: "Initialize the .lpckrc config file",
   },
   prepack: {
     type: "boolean",
     default: false,
+    description: "Run the preset's prepack script before packing",
   },
   dev: {
     type: "boolean",
     default: false,
+    description: "Also update and install devDependencies to local packs",
   },
   peer: {
     type: "boolean",
     default: false,
+    description: "Also update and install peerDependencies to local packs",
   },
   rawInstall: {
     type: "boolean",
     default: false,
+    description: "Run npm install without passing pack paths",
   },
-} satisfies ParseArgsOptionsConfig;
+  clean: {
+    type: "boolean",
+    default: false,
+    description: "Remove all packed .tgz files from ~/.lpck/packs/",
+  },
+} satisfies CliArgs;
 
 type Command = keyof typeof ARGS_OPTIONS | "install";
 
@@ -445,9 +472,9 @@ type ExecutionArgs = {
 };
 
 class LPCK {
-  #lpckRc: LpckRC;
+  #lpckRc: LpckRC = { presets: [] };
 
-  #args: ExecutionArgs;
+  #args: ExecutionArgs = { command: "help" };
 
   constructor() {
     this.#loadRC();
@@ -479,7 +506,7 @@ class LPCK {
       allowNegative: true,
     });
 
-    const { preset, printPresets, init, prepack, rawInstall, dev, peer } =
+    const { preset, printPresets, init, prepack, rawInstall, dev, peer, clean } =
       parsedArgs.values;
     const hasPositionals = parsedArgs.positionals.length === 1;
 
@@ -507,6 +534,14 @@ class LPCK {
     if (init) {
       this.#args = {
         command: "init",
+      };
+
+      return;
+    }
+
+    if (clean) {
+      this.#args = {
+        command: "clean",
       };
 
       return;
@@ -544,16 +579,10 @@ class LPCK {
       code("lpck [options]"),
     );
     console.info("Options:");
-    console.info("  -h, --help: Show this help");
-    console.info("  -p, --preset: The preset to use");
-    console.info("  --printPresets: Print the presets");
-    console.info("  --init: Initialize the LPCK RC");
-    console.info("  --prepack: Whether to execute the prepack script");
-    console.info("  --dev: Whether to include dev dependencies");
-    console.info("  --peer: Whether to include peer dependencies");
-    console.info(
-      "  --rawInstall: Run install without specifying the packages to install",
-    );
+    for (const [key, value] of Object.entries(ARGS_OPTIONS) as [string, CliArgDescription][]) {
+      const flag = `${value.short ? `-${value.short}, ` : ""}--${key}`;
+      console.info(`  ${flag}: ${value.description}`);
+    }
   }
 
   #printPresets() {
@@ -616,7 +645,6 @@ class LPCK {
       rawInstall: this.#args.rawInstall,
     });
 
-    this.#cleanUpPacks();
     console.info(green("Done"));
   }
 
@@ -654,6 +682,9 @@ class LPCK {
         break;
       case "init":
         this.#initRC();
+        break;
+      case "clean":
+        this.#cleanUpPacks();
         break;
       default:
         this.#help();

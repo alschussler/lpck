@@ -5,7 +5,8 @@
   "type": "module",
   "bin": "lib/index.js",
   "scripts": {
-    "run": "npx lpck",
+    "run": "node lib/index.js",
+    "lint": "npx tsc --noEmit",
     "build": "npx tsc"
   },
   "author": "alschussler",
