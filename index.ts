@@ -676,13 +676,11 @@ class LPCK {
     if (!name) {
       console.error("Missing preset name. Usage:", code("lpck --addPreset <name> <path>"));
       process.exit(1);
-      return;
     }
 
     if (!presetPath) {
       console.error("Missing preset path. Usage:", code("lpck --addPreset <name> <path>"));
       process.exit(1);
-      return;
     }
 
     const resolvedPath = path.resolve(presetPath);
@@ -690,7 +688,6 @@ class LPCK {
     if (!existsSync(resolvedPath)) {
       console.error("Preset path does not exist:", code(resolvedPath));
       process.exit(1);
-      return;
     }
 
     const isValidPresetPath = await this.#validatePresetPath(resolvedPath);
@@ -701,10 +698,9 @@ class LPCK {
         code(resolvedPath),
       );
       process.exit(1);
-      return;
     }
 
-    const existingPresetIndex = this.#lpckRc.presets.findIndex(
+    const presetIndex = this.#lpckRc.presets.findIndex(
       (preset) => preset.name === name,
     );
 
@@ -714,8 +710,8 @@ class LPCK {
       ...(this.#args.prepackCmd ? { prepack: this.#args.prepackCmd } : {}),
     };
 
-    if (existingPresetIndex >= 0) {
-      this.#lpckRc.presets[existingPresetIndex] = presetToSave;
+    if (presetIndex >= 0) {
+      this.#lpckRc.presets[presetIndex] = presetToSave;
     } else {
       this.#lpckRc.presets.push(presetToSave);
     }
@@ -723,7 +719,7 @@ class LPCK {
     writeFileSync(LPCK_RC_PATH, JSON.stringify(this.#lpckRc, null, 2));
 
     console.info(
-      existingPresetIndex >= 0 ? "Preset updated:" : "Preset added:",
+      presetIndex >= 0 ? "Preset updated:" : "Preset added:",
       code(name),
     );
   }
