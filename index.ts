@@ -694,7 +694,7 @@ class LPCK {
 
     if (!isValidPresetPath) {
       console.error(
-        "Preset path must contain a valid npm package or workspace root:",
+        "Preset path must contain a package.json with name and version, or a workspace root with workspaces:",
         code(resolvedPath),
       );
       process.exit(1);
