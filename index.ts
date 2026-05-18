@@ -530,7 +530,7 @@ class LPCK {
       addPreset,
     } =
       parsedArgs.values;
-    const hasPositionals = parsedArgs.positionals.length === 1;
+    const hasInstallPositional = !addPreset && parsedArgs.positionals.length === 1;
 
     if (preset) {
       this.#args = {
@@ -580,7 +580,7 @@ class LPCK {
       return;
     }
 
-    if (hasPositionals) {
+    if (hasInstallPositional) {
       this.#args = {
         command: "install",
         path: parsedArgs.positionals[0],
@@ -661,12 +661,7 @@ class LPCK {
       const hasWorkspaces = Boolean(packageContent.workspaces);
       const hasPackageName = Boolean(packageContent.name);
       const hasPackageVersion = Boolean(packageContent.version);
-
-      if (hasWorkspaces || (hasPackageName && hasPackageVersion)) {
-        return true;
-      }
-
-      return false;
+      return hasWorkspaces || (hasPackageName && hasPackageVersion);
     } catch {
       return false;
     }
