@@ -66,6 +66,12 @@ lpck -p my-preset --prepack
 
 # List all presets
 lpck --printPresets
+
+# Add or update a preset
+lpck --addPreset my-preset ~/projects/my-component-library
+
+# Add or update a preset with a prepack command
+lpck --addPreset my-preset ~/projects/my-component-library --prepackCmd "npm run build"
 ```
 
 ### CLI Options
@@ -75,6 +81,8 @@ lpck --printPresets
 | `--help`          | `-h`  | Show help information                                                      |
 | `--preset <name>` | `-p`  | Use a saved preset                                                         |
 | `--printPresets`  |       | Print all configured presets                                               |
+| `--addPreset`     |       | Create or update a preset using positional args: `<name> <path>`          |
+| `--prepackCmd`    |       | Optional prepack command used with `--addPreset`                           |
 | `--init`          |       | Initialize the `.lpckrc` config file                                       |
 | `--prepack`       |       | Run the preset's prepack script before packing (when using a preset)       |
 | `--dev`           |       | Also update and install devDependencies to local packs                     |

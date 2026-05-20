@@ -46,7 +46,7 @@ type LpckRC = {
   presets: {
     name: string;
     path: string;
-    prepack: string;
+    prepack?: string;
   }[];
 };
 
@@ -458,14 +458,25 @@ const ARGS_OPTIONS = {
     default: false,
     description: "Remove all packed .tgz files from ~/.lpck/packs/",
   },
+  addPreset: {
+    type: "boolean",
+    default: false,
+    description: "Create or update a preset by name and path",
+  },
+  prepackCmd: {
+    type: "string",
+    description: "Optional prepack command used with --addPreset",
+  },
 } satisfies CliArgs;
 
 type Command = keyof typeof ARGS_OPTIONS | "install";
 
 type ExecutionArgs = {
   command: Command;
+  name?: string;
   path?: string;
   prepack?: boolean;
+  prepackCmd?: string;
   dev?: boolean;
   peer?: boolean;
   rawInstall?: boolean;
@@ -506,9 +517,20 @@ class LPCK {
       allowNegative: true,
     });
 
-    const { preset, printPresets, init, prepack, rawInstall, dev, peer, clean } =
+    const {
+      preset,
+      printPresets,
+      init,
+      prepack,
+      prepackCmd,
+      rawInstall,
+      dev,
+      peer,
+      clean,
+      addPreset,
+    } =
       parsedArgs.values;
-    const hasPositionals = parsedArgs.positionals.length === 1;
+    const hasInstallPositional = !addPreset && parsedArgs.positionals.length === 1;
 
     if (preset) {
       this.#args = {
@@ -547,7 +569,18 @@ class LPCK {
       return;
     }
 
-    if (hasPositionals) {
+    if (addPreset) {
+      this.#args = {
+        command: "addPreset",
+        name: parsedArgs.positionals[0],
+        path: parsedArgs.positionals[1],
+        prepackCmd,
+      };
+
+      return;
+    }
+
+    if (hasInstallPositional) {
       this.#args = {
         command: "install",
         path: parsedArgs.positionals[0],
@@ -621,6 +654,71 @@ class LPCK {
     console.info("LPCK RC initialized at: ", LPCK_RC_PATH);
   }
 
+  async #validatePresetPath(presetPath: string) {
+    try {
+      const packageJson = await getPackageJson(presetPath);
+      const packageContent = packageJson.content;
+      const hasWorkspaces = Boolean(packageContent.workspaces);
+      const hasPackageName = Boolean(packageContent.name);
+      const hasPackageVersion = Boolean(packageContent.version);
+      return hasWorkspaces || (hasPackageName && hasPackageVersion);
+    } catch {
+      return false;
+    }
+  }
+
+  async #addPreset(name?: string, presetPath?: string) {
+    if (!name) {
+      console.error("Missing preset name. Usage:", code("lpck --addPreset <name> <path>"));
+      process.exit(1);
+    }
+
+    if (!presetPath) {
+      console.error("Missing preset path. Usage:", code("lpck --addPreset <name> <path>"));
+      process.exit(1);
+    }
+
+    const resolvedPath = path.resolve(presetPath);
+
+    if (!existsSync(resolvedPath)) {
+      console.error("Preset path does not exist:", code(resolvedPath));
+      process.exit(1);
+    }
+
+    const isValidPresetPath = await this.#validatePresetPath(resolvedPath);
+
+    if (!isValidPresetPath) {
+      console.error(
+        "Preset path must contain a package.json with name and version, or a workspace root with workspaces:",
+        code(resolvedPath),
+      );
+      process.exit(1);
+    }
+
+    const presetIndex = this.#lpckRc.presets.findIndex(
+      (preset) => preset.name === name,
+    );
+
+    const presetToSave = {
+      name,
+      path: resolvedPath,
+      ...(this.#args.prepackCmd ? { prepack: this.#args.prepackCmd } : {}),
+    };
+
+    if (presetIndex >= 0) {
+      this.#lpckRc.presets[presetIndex] = presetToSave;
+    } else {
+      this.#lpckRc.presets.push(presetToSave);
+    }
+
+    writeFileSync(LPCK_RC_PATH, JSON.stringify(this.#lpckRc, null, 2));
+
+    console.info(
+      presetIndex >= 0 ? "Preset updated:" : "Preset added:",
+      code(name),
+    );
+  }
+
   async #install(originPackageDir: string) {
     const targetPackage = new TargetWorkspace(process.cwd());
     const originPackage = new OriginWorkspace(originPackageDir);
@@ -685,6 +783,9 @@ class LPCK {
         break;
       case "clean":
         this.#cleanUpPacks();
+        break;
+      case "addPreset":
+        await this.#addPreset(this.#args.name, this.#args.path);
         break;
       default:
         this.#help();
