@@ -92,7 +92,7 @@ lpck --addPreset my-preset ~/projects/my-component-library --prepackCmd "npm run
 | `--prepack`       |       | Run the preset's prepack script before packing (when using a preset)       |
 | `--dev`           |       | Also update and install devDependencies to local packs                     |
 | `--peer`          |       | Also update and install peerDependencies to local packs                    |
-| `--rawInstall`    |       | Run `npm install` without passing pack paths (default: `true`)             |
+| `--rawInstall`    |       | Run `npm install` without passing pack paths (default: `true`; disable with `--no-rawInstall`) |
 | `--clean`         |       | Remove all packed `.tgz` files from `~/.lpck/packs/`                       |
 
 ## Configuration
