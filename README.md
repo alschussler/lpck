@@ -29,6 +29,11 @@ lpck /path/to/source/workspace-or-package
 ```
 
 The source can be either the root of an npm workspace (monorepo) or a single package directory.
+You can also pass multiple sources in one command:
+
+```bash
+lpck /path/to/source-1 /path/to/source-2 /path/to/source-3
+```
 
 **Example:**
 
@@ -45,8 +50,8 @@ lpck ~/projects/my-package
 # Also update devDependencies and/or peerDependencies to local packs
 lpck ~/projects/my-component-library --dev --peer
 
-# Run install without specifying packs (e.g. after editing package.json manually)
-lpck ~/projects/my-component-library --rawInstall
+# Pass pack paths to npm install explicitly
+lpck ~/projects/my-component-library --no-rawInstall
 ```
 
 ### Using Presets
@@ -87,7 +92,7 @@ lpck --addPreset my-preset ~/projects/my-component-library --prepackCmd "npm run
 | `--prepack`       |       | Run the preset's prepack script before packing (when using a preset)       |
 | `--dev`           |       | Also update and install devDependencies to local packs                     |
 | `--peer`          |       | Also update and install peerDependencies to local packs                    |
-| `--rawInstall`    |       | Run `npm install` without passing pack paths (install from existing state) |
+| `--rawInstall`    |       | Run `npm install` without passing pack paths (default: `true`)             |
 | `--clean`         |       | Remove all packed `.tgz` files from `~/.lpck/packs/`                       |
 
 ## Configuration

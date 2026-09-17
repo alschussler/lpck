@@ -450,7 +450,7 @@ const ARGS_OPTIONS = {
   },
   rawInstall: {
     type: "boolean",
-    default: false,
+    default: true,
     description: "Run npm install without passing pack paths",
   },
   clean: {
@@ -475,6 +475,7 @@ type ExecutionArgs = {
   command: Command;
   name?: string;
   path?: string;
+  paths?: string[];
   prepack?: boolean;
   prepackCmd?: string;
   dev?: boolean;
@@ -530,7 +531,7 @@ class LPCK {
       addPreset,
     } =
       parsedArgs.values;
-    const hasInstallPositional = !addPreset && parsedArgs.positionals.length === 1;
+    const hasInstallPositional = !addPreset && parsedArgs.positionals.length > 0;
 
     if (preset) {
       this.#args = {
@@ -583,7 +584,7 @@ class LPCK {
     if (hasInstallPositional) {
       this.#args = {
         command: "install",
-        path: parsedArgs.positionals[0],
+        paths: parsedArgs.positionals,
         rawInstall,
         dev,
         peer,
@@ -607,7 +608,7 @@ class LPCK {
   #help() {
     console.info(
       "Usage:",
-      code("lpck <workspace-root-package-dir>"),
+      code("lpck <workspace-root-package-dir> [more-workspace-root-package-dirs...]"),
       "or",
       code("lpck [options]"),
     );
@@ -746,6 +747,12 @@ class LPCK {
     console.info(green("Done"));
   }
 
+  async #installAll(originPackageDirs: string[]) {
+    for (const originPackageDir of originPackageDirs) {
+      await this.#install(originPackageDir);
+    }
+  }
+
   async #preset(name: string) {
     console.info("Loading preset: ", code(name));
 
@@ -767,7 +774,7 @@ class LPCK {
   async run() {
     switch (this.#args.command) {
       case "install":
-        await this.#install(this.#args.path!);
+        await this.#installAll(this.#args.paths!);
         break;
       case "preset":
         await this.#preset(this.#args.path!);
