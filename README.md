@@ -29,6 +29,11 @@ lpck /path/to/source/workspace-or-package
 ```
 
 The source can be either the root of an npm workspace (monorepo) or a single package directory.
+You can also pass multiple sources in one command:
+
+```bash
+lpck /path/to/source-1 /path/to/source-2 /path/to/source-3
+```
 
 **Example:**
 
@@ -45,8 +50,8 @@ lpck ~/projects/my-package
 # Also update devDependencies and/or peerDependencies to local packs
 lpck ~/projects/my-component-library --dev --peer
 
-# Run install without specifying packs (e.g. after editing package.json manually)
-lpck ~/projects/my-component-library --rawInstall
+# Pass pack paths to npm install explicitly
+lpck ~/projects/my-component-library --no-rawInstall
 ```
 
 ### Using Presets
@@ -70,6 +75,9 @@ lpck --printPresets
 # Add or update a preset
 lpck --addPreset my-preset ~/projects/my-component-library
 
+# Add or update a preset with multiple source paths
+lpck --addPreset my-preset ~/projects/my-component-library ~/projects/my-package
+
 # Add or update a preset with a prepack command
 lpck --addPreset my-preset ~/projects/my-component-library --prepackCmd "npm run build"
 ```
@@ -81,13 +89,13 @@ lpck --addPreset my-preset ~/projects/my-component-library --prepackCmd "npm run
 | `--help`          | `-h`  | Show help information                                                      |
 | `--preset <name>` | `-p`  | Use a saved preset                                                         |
 | `--printPresets`  |       | Print all configured presets                                               |
-| `--addPreset`     |       | Create or update a preset using positional args: `<name> <path>`          |
+| `--addPreset`     |       | Create or update a preset using positional args: `<name> <path> [more-paths...]` |
 | `--prepackCmd`    |       | Optional prepack command used with `--addPreset`                           |
 | `--init`          |       | Initialize the `.lpckrc` config file                                       |
 | `--prepack`       |       | Run the preset's prepack script before packing (when using a preset)       |
 | `--dev`           |       | Also update and install devDependencies to local packs                     |
 | `--peer`          |       | Also update and install peerDependencies to local packs                    |
-| `--rawInstall`    |       | Run `npm install` without passing pack paths (install from existing state) |
+| `--rawInstall`    |       | Run `npm install` without passing pack paths (default: `true`; disable with `--no-rawInstall`) |
 | `--clean`         |       | Remove all packed `.tgz` files from `~/.lpck/packs/`                       |
 
 ## Configuration
@@ -101,6 +109,17 @@ The configuration file is located at `~/.lpck/.lpckrc` and uses JSON format:
       "name": "my-preset",
       "path": "/path/to/workspace",
       "prepack": "npm run build"
+    },
+    {
+      "name": "my-preset-group",
+      "group": [
+        {
+          "path": "/path/to/workspace-1"
+        },
+        {
+          "path": "/path/to/workspace-2"
+        }
+      ]
     }
   ]
 }
@@ -110,9 +129,10 @@ The configuration file is located at `~/.lpck/.lpckrc` and uses JSON format:
 
 | Field     | Description                                        |
 | --------- | -------------------------------------------------- |
-| `name`    | The preset identifier used with `-p`               |
-| `path`    | Absolute path to the workspace root                |
-| `prepack` | Command to run before packing (e.g., build script) |
+| `name`    | The preset identifier used with `-p`                                            |
+| `path`    | Absolute path to a single workspace/package root (legacy and still supported)    |
+| `group`   | Optional list of source path objects for multi-source presets                     |
+| `prepack` | Command to run before packing (e.g., build script); if used with `group`, it runs for each path |
 
 ## How It Works
 

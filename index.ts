@@ -42,12 +42,19 @@ type CliArgDescription = ParseArgsOptionDescriptor & {
 
 type CliArgs = Record<string, CliArgDescription>;
 
+type LpckPresetGroupItem = {
+  path: string;
+};
+
+type LpckPreset = {
+  name: string;
+  path?: string;
+  group?: LpckPresetGroupItem[];
+  prepack?: string;
+};
+
 type LpckRC = {
-  presets: {
-    name: string;
-    path: string;
-    prepack?: string;
-  }[];
+  presets: LpckPreset[];
 };
 
 const homeDir = os.homedir();
@@ -450,7 +457,7 @@ const ARGS_OPTIONS = {
   },
   rawInstall: {
     type: "boolean",
-    default: false,
+    default: true,
     description: "Run npm install without passing pack paths",
   },
   clean: {
@@ -461,7 +468,7 @@ const ARGS_OPTIONS = {
   addPreset: {
     type: "boolean",
     default: false,
-    description: "Create or update a preset by name and path",
+    description: "Create or update a preset by name and one or more paths",
   },
   prepackCmd: {
     type: "string",
@@ -475,6 +482,7 @@ type ExecutionArgs = {
   command: Command;
   name?: string;
   path?: string;
+  paths?: string[];
   prepack?: boolean;
   prepackCmd?: string;
   dev?: boolean;
@@ -530,7 +538,7 @@ class LPCK {
       addPreset,
     } =
       parsedArgs.values;
-    const hasInstallPositional = !addPreset && parsedArgs.positionals.length === 1;
+    const hasInstallPositional = !addPreset && parsedArgs.positionals.length > 0;
 
     if (preset) {
       this.#args = {
@@ -573,7 +581,7 @@ class LPCK {
       this.#args = {
         command: "addPreset",
         name: parsedArgs.positionals[0],
-        path: parsedArgs.positionals[1],
+        paths: parsedArgs.positionals.slice(1),
         prepackCmd,
       };
 
@@ -583,7 +591,7 @@ class LPCK {
     if (hasInstallPositional) {
       this.#args = {
         command: "install",
-        path: parsedArgs.positionals[0],
+        paths: parsedArgs.positionals,
         rawInstall,
         dev,
         peer,
@@ -607,7 +615,7 @@ class LPCK {
   #help() {
     console.info(
       "Usage:",
-      code("lpck <workspace-root-package-dir>"),
+      code("lpck <workspace-root-package-dir> [more-workspace-root-package-dirs...]"),
       "or",
       code("lpck [options]"),
     );
@@ -631,6 +639,14 @@ class LPCK {
     );
   }
 
+  #getPresetPaths(preset: LpckPreset) {
+    if (preset.group && preset.group.length > 0) {
+      return preset.group.map((item) => item.path);
+    }
+
+    return preset.path ? [preset.path] : [];
+  }
+
   #initRC() {
     console.info("Initializing LPCK RC...");
 
@@ -646,6 +662,17 @@ class LPCK {
           name: "<preset-name>",
           path: "<preset-path>",
           prepack: "<prepack-script>",
+        },
+        {
+          name: "<preset-group-name>",
+          group: [
+            {
+              path: "<preset-path-1>",
+            },
+            {
+              path: "<preset-path-2>",
+            },
+          ],
         },
       ],
     };
@@ -667,41 +694,57 @@ class LPCK {
     }
   }
 
-  async #addPreset(name?: string, presetPath?: string) {
+  async #addPreset(name?: string, presetPaths?: string[]) {
     if (!name) {
-      console.error("Missing preset name. Usage:", code("lpck --addPreset <name> <path>"));
-      process.exit(1);
-    }
-
-    if (!presetPath) {
-      console.error("Missing preset path. Usage:", code("lpck --addPreset <name> <path>"));
-      process.exit(1);
-    }
-
-    const resolvedPath = path.resolve(presetPath);
-
-    if (!existsSync(resolvedPath)) {
-      console.error("Preset path does not exist:", code(resolvedPath));
-      process.exit(1);
-    }
-
-    const isValidPresetPath = await this.#validatePresetPath(resolvedPath);
-
-    if (!isValidPresetPath) {
       console.error(
-        "Preset path must contain a package.json with name and version, or a workspace root with workspaces:",
-        code(resolvedPath),
+        "Missing preset name. Usage:",
+        code("lpck --addPreset <name> <path> [more-paths...]"),
       );
       process.exit(1);
+      return;
+    }
+
+    if (!presetPaths || presetPaths.length === 0) {
+      console.error(
+        "Missing preset path. Usage:",
+        code("lpck --addPreset <name> <path> [more-paths...]"),
+      );
+      process.exit(1);
+      return;
+    }
+
+    const resolvedPaths = presetPaths.map((presetPath) => path.resolve(presetPath));
+
+    for (const resolvedPath of resolvedPaths) {
+      if (!existsSync(resolvedPath)) {
+        console.error("Preset path does not exist:", code(resolvedPath));
+        process.exit(1);
+      }
+
+      const isValidPresetPath = await this.#validatePresetPath(resolvedPath);
+
+      if (!isValidPresetPath) {
+        console.error(
+          "Preset path must contain a package.json with name and version, or a workspace root with workspaces:",
+          code(resolvedPath),
+        );
+        process.exit(1);
+      }
     }
 
     const presetIndex = this.#lpckRc.presets.findIndex(
       (preset) => preset.name === name,
     );
 
-    const presetToSave = {
+    const presetToSave: LpckPreset = {
       name,
-      path: resolvedPath,
+      ...(resolvedPaths.length === 1
+        ? { path: resolvedPaths[0]! }
+        : {
+            group: resolvedPaths.map((resolvedPath) => ({
+              path: resolvedPath,
+            })),
+          }),
       ...(this.#args.prepackCmd ? { prepack: this.#args.prepackCmd } : {}),
     };
 
@@ -746,6 +789,12 @@ class LPCK {
     console.info(green("Done"));
   }
 
+  async #installAll(originPackageDirs: string[]) {
+    for (const originPackageDir of originPackageDirs) {
+      await this.#install(originPackageDir);
+    }
+  }
+
   async #preset(name: string) {
     console.info("Loading preset: ", code(name));
 
@@ -757,17 +806,27 @@ class LPCK {
       return;
     }
 
-    if (preset.prepack && this.#args.prepack) {
-      await prepack(preset.prepack, preset.path);
+    const presetPaths = this.#getPresetPaths(preset);
+
+    if (presetPaths.length === 0) {
+      console.error("Preset ", code(name), " has no install paths configured");
+      process.exit(1);
+      return;
     }
 
-    await this.#install(preset.path);
+    if (preset.prepack && this.#args.prepack) {
+      for (const presetPath of presetPaths) {
+        await prepack(preset.prepack, presetPath);
+      }
+    }
+
+    await this.#installAll(presetPaths);
   }
 
   async run() {
     switch (this.#args.command) {
       case "install":
-        await this.#install(this.#args.path!);
+        await this.#installAll(this.#args.paths!);
         break;
       case "preset":
         await this.#preset(this.#args.path!);
@@ -785,7 +844,7 @@ class LPCK {
         this.#cleanUpPacks();
         break;
       case "addPreset":
-        await this.#addPreset(this.#args.name, this.#args.path);
+        await this.#addPreset(this.#args.name, this.#args.paths);
         break;
       default:
         this.#help();
