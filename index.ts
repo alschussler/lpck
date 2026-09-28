@@ -73,7 +73,7 @@ async function pack(packageDir: string) {
     const p = spawn(
       "npm",
       ["pack", "--pack-destination", LPCK_PACK_DIR, "--workspaces"],
-      { stdio: ["ignore", "ignore", "ignore"], cwd: packageDir },
+      { stdio: ["ignore", "ignore", "ignore"], cwd: packageDir, shell: true },
     );
     p.on("exit", (code) => (code === 0 ? resolve() : reject(code)));
   });
@@ -99,6 +99,7 @@ async function installAllPacks(packageDir: string, rawInstall?: boolean) {
       {
         stdio: "inherit",
         cwd: packageDir,
+        shell: true,
       },
     );
 
@@ -110,10 +111,9 @@ async function installAllPacks(packageDir: string, rawInstall?: boolean) {
 async function prepack(script: string, cwd: string) {
   console.info("Executing prepack script...", dim(script));
 
-  const [command, ...args] = script.split(" ");
-
   await new Promise<void>((resolve, reject) => {
-    const p = spawn(command, args, {
+    const p = spawn(script, {
+      shell: true,
       stdio: ["ignore", "ignore", "inherit"],
       cwd,
     });
