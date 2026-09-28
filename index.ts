@@ -36,18 +36,6 @@ function code(str: string) {
   return `\x1b[33m${str}\x1b[0m`;
 }
 
-function resolveSpawnCommand(command: string) {
-  if (process.platform !== "win32") {
-    return command;
-  }
-
-  if (command === "npm" || command === "npx") {
-    return `${command}.cmd`;
-  }
-
-  return command;
-}
-
 type CliArgDescription = ParseArgsOptionDescriptor & {
   description: string;
 };
@@ -83,9 +71,9 @@ async function pack(packageDir: string) {
     );
 
     const p = spawn(
-      resolveSpawnCommand("npm"),
+      "npm",
       ["pack", "--pack-destination", LPCK_PACK_DIR, "--workspaces"],
-      { stdio: ["ignore", "ignore", "ignore"], cwd: packageDir },
+      { stdio: ["ignore", "ignore", "ignore"], cwd: packageDir, shell: true },
     );
     p.on("exit", (code) => (code === 0 ? resolve() : reject(code)));
   });
@@ -106,11 +94,12 @@ async function installAllPacks(packageDir: string, rawInstall?: boolean) {
 
   await new Promise<void>((resolve, reject) => {
     const p = spawn(
-      resolveSpawnCommand("npm"),
+      "npm",
       ["install", ...(rawInstall ? [] : tgzPaths), "--no-save"],
       {
         stdio: "inherit",
         cwd: packageDir,
+        shell: true,
       },
     );
 
