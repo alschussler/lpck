@@ -36,6 +36,10 @@ function code(str: string) {
   return `\x1b[33m${str}\x1b[0m`;
 }
 
+function getWindowsSpawnOptions() {
+  return process.platform === "win32" ? { shell: true } : {};
+}
+
 type CliArgDescription = ParseArgsOptionDescriptor & {
   description: string;
 };
@@ -73,7 +77,11 @@ async function pack(packageDir: string) {
     const p = spawn(
       "npm",
       ["pack", "--pack-destination", LPCK_PACK_DIR, "--workspaces"],
-      { stdio: ["ignore", "ignore", "ignore"], cwd: packageDir },
+      {
+        stdio: ["ignore", "ignore", "ignore"],
+        cwd: packageDir,
+        ...getWindowsSpawnOptions(),
+      },
     );
     p.on("exit", (code) => (code === 0 ? resolve() : reject(code)));
   });
@@ -99,6 +107,7 @@ async function installAllPacks(packageDir: string, rawInstall?: boolean) {
       {
         stdio: "inherit",
         cwd: packageDir,
+        ...getWindowsSpawnOptions(),
       },
     );
 
@@ -116,6 +125,7 @@ async function prepack(script: string, cwd: string) {
     const p = spawn(command, args, {
       stdio: ["ignore", "ignore", "inherit"],
       cwd,
+      ...getWindowsSpawnOptions(),
     });
     p.on("exit", (code) => (code === 0 ? resolve() : reject(code)));
   });
