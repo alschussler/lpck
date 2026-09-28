@@ -122,10 +122,9 @@ async function installAllPacks(packageDir: string, rawInstall?: boolean) {
 async function prepack(script: string, cwd: string) {
   console.info("Executing prepack script...", dim(script));
 
-  const [command, ...args] = script.split(" ");
-
   await new Promise<void>((resolve, reject) => {
-    const p = spawn(resolveSpawnCommand(command), args, {
+    const p = spawn(script, {
+      shell: true,
       stdio: ["ignore", "ignore", "inherit"],
       cwd,
     });
