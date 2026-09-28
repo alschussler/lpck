@@ -36,8 +36,16 @@ function code(str: string) {
   return `\x1b[33m${str}\x1b[0m`;
 }
 
-function getWindowsSpawnOptions() {
-  return process.platform === "win32" ? { shell: true } : {};
+function resolveSpawnCommand(command: string) {
+  if (process.platform !== "win32") {
+    return command;
+  }
+
+  if (command === "npm" || command === "npx") {
+    return `${command}.cmd`;
+  }
+
+  return command;
 }
 
 type CliArgDescription = ParseArgsOptionDescriptor & {
@@ -75,13 +83,9 @@ async function pack(packageDir: string) {
     );
 
     const p = spawn(
-      "npm",
+      resolveSpawnCommand("npm"),
       ["pack", "--pack-destination", LPCK_PACK_DIR, "--workspaces"],
-      {
-        stdio: ["ignore", "ignore", "ignore"],
-        cwd: packageDir,
-        ...getWindowsSpawnOptions(),
-      },
+      { stdio: ["ignore", "ignore", "ignore"], cwd: packageDir },
     );
     p.on("exit", (code) => (code === 0 ? resolve() : reject(code)));
   });
@@ -102,12 +106,11 @@ async function installAllPacks(packageDir: string, rawInstall?: boolean) {
 
   await new Promise<void>((resolve, reject) => {
     const p = spawn(
-      "npm",
+      resolveSpawnCommand("npm"),
       ["install", ...(rawInstall ? [] : tgzPaths), "--no-save"],
       {
         stdio: "inherit",
         cwd: packageDir,
-        ...getWindowsSpawnOptions(),
       },
     );
 
@@ -122,10 +125,9 @@ async function prepack(script: string, cwd: string) {
   const [command, ...args] = script.split(" ");
 
   await new Promise<void>((resolve, reject) => {
-    const p = spawn(command, args, {
+    const p = spawn(resolveSpawnCommand(command), args, {
       stdio: ["ignore", "ignore", "inherit"],
       cwd,
-      ...getWindowsSpawnOptions(),
     });
     p.on("exit", (code) => (code === 0 ? resolve() : reject(code)));
   });
